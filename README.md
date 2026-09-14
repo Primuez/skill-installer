@@ -31,7 +31,11 @@ AI Agent skills (such as those for **Hermes**, **Claude Code**, **Antigravity**,
 ## ⚡ Key Features
 
 - 🔍 **Stage 1 — Need Assessment & Alternative Discovery:** Analyzes the target skill's functional purpose against your existing library. If your agent already possesses functional equivalents covering >80% of the capability, it prevents duplicate installation.
-- 🛡️ **Stage 2 — NVIDIA SkillSpector Security Gate:** Integrates NVIDIA's state-of-the-art security analyzer to inspect prompt instructions and executable scripts for tool poisoning, reverse shells, and credential exfiltration before any code touches your system.
+- 🛡️ **Stage 2 — Adaptive Security Inspection Gate:**
+  - **NVIDIA SkillSpector Integration:** Runs AST and semantic scanning for prompt injection, environment harvesting, and reverse shells.
+  - **Alternative Inspector Discovery:** If SkillSpector is missing, automatically scans your system for alternative security skills (such as `skill-audit` or `cyber-audit`) and uses their security rules.
+  - **Interactive Setup Prompt:** If no inspector exists anywhere on your system, prompts you: *"No skill inspector detected. Would you like to install NVIDIA SkillSpector?"* with one-click automated setup (`skill-installer setup-inspector`).
+  - **Heuristic Fallback:** Gracefully falls back to a built-in static analyzer so you are never left unprotected.
 - 🚀 **Stage 3 — Automated Installation & Multi-Target Backup:**
   - Installs verified skills locally to your agent's directory.
   - **Existing Backup Detection:** Syncs automatically to your existing git repository (e.g., `CLI-Skills-and-MDs`).

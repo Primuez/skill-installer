@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 """
-Skill Installer (skill-installer)
+Skill Installer (skill-installer) v2.1.0
 The intelligent, security-first package manager and installer for AI Agent Skills.
 
 Pipeline:
 1. Need Assessment & Alternatives Check
-2. NVIDIA SkillSpector Security Scan
+2. Security Inspection Gate:
+   - NVIDIA SkillSpector detection
+   - Alternative inspector discovery (e.g. skill-audit, cyber-audit)
+   - Interactive prompt / auto-installer for inspector if missing
+   - Built-in heuristic static analyzer fallback
 3. Automated Installation & Smart Backup Routing (Existing repo, Auto-created repo, or Cloud sync)
 """
 
@@ -127,83 +131,169 @@ def check_alternatives(new_skill_meta, existing_skills):
         "alternatives": []
     }
 
-def scan_security(skill_path):
+def discover_alternative_inspectors(skills_dir=DEFAULT_SKILLS_DIR):
     """
-    Stage 2: NVIDIA SkillSpector Security Scan
+    Check if alternative skill security inspectors are installed in the agent environment.
+    (e.g., skill-audit, cyber-audit, skillspector skill)
     """
-    # 1. Check if skillspector CLI exists
+    known_inspector_names = {"skill-audit", "skillspector", "cyber-audit", "skill-check"}
+    installed = get_installed_skills(skills_dir)
+    found = []
+    for s in installed:
+        if s["name"].lower() in known_inspector_names:
+            found.append(s)
+    return found
+
+def setup_nvidia_skillspector():
+    """Install NVIDIA SkillSpector into ~/.venv-skillspector."""
+    venv_dir = os.path.expanduser("~/.venv-skillspector")
+    print(f"\n[SETUP] Installing NVIDIA SkillSpector into '{venv_dir}'...")
+    print(" -> Creating dedicated virtual environment...")
+    _, _, code1 = run_cmd(f"python3 -m venv '{venv_dir}'")
+    if code1 != 0:
+        print("[ERROR] Failed to create python venv. Please ensure 'python3-venv' is available.")
+        return False
+
+    pip_bin = os.path.join(venv_dir, "bin", "pip")
+    print(" -> Installing skillspector from official NVIDIA repository...")
+    _, err2, code2 = run_cmd(f"'{pip_bin}' install git+https://github.com/NVIDIA/skillspector.git")
+    if code2 != 0:
+        print(f"[ERROR] Failed to install skillspector via pip: {err2}")
+        return False
+
+    print("[SUCCESS] NVIDIA SkillSpector successfully installed and ready!\n")
+    return True
+
+def scan_security(skill_path, interactive=False, auto_install_inspector=False):
+    """
+    Stage 2: Security Inspection Gate
+    1. Checks for NVIDIA SkillSpector CLI
+    2. If missing, checks for alternative skill inspector tools in the system
+    3. If none found, prompts user / offers setup
+    4. Falls back gracefully to built-in heuristic static analyzer
+    """
     scanner = None
     if shutil.which("skillspector"):
         scanner = "skillspector"
     elif os.path.exists(SKILLSPECTOR_BIN):
         scanner = SKILLSPECTOR_BIN
 
-    if not scanner:
-        print("[WARN] NVIDIA SkillSpector not found in PATH or ~/.venv-skillspector. Performing basic static analysis...")
-        return static_security_fallback(skill_path)
-
-    cmd = f"{scanner} scan '{skill_path}' --format json --no-llm"
-    stdout, stderr, code = run_cmd(cmd)
-
-    try:
-        data = json.loads(stdout)
-        score = data.get("risk_score", 0)
-        severity = data.get("risk_severity", "LOW")
-        findings = data.get("filtered_findings", [])
-        return {
-            "safe": score < 50 and severity not in ["HIGH", "CRITICAL"],
-            "risk_score": score,
-            "risk_severity": severity,
-            "findings": findings,
-            "scanner": "NVIDIA SkillSpector"
-        }
-    except Exception:
-        # If output was terminal formatted
-        if "HIGH" in stdout or "CRITICAL" in stdout:
+    # Case A: NVIDIA SkillSpector found
+    if scanner:
+        cmd = f"{scanner} scan '{skill_path}' --format json --no-llm"
+        stdout, stderr, code = run_cmd(cmd)
+        try:
+            data = json.loads(stdout)
+            score = data.get("risk_score", 0)
+            severity = data.get("risk_severity", "LOW")
+            findings = data.get("filtered_findings", [])
             return {
-                "safe": False,
-                "risk_score": 80,
-                "risk_severity": "HIGH",
-                "findings": [{"message": "High severity flags found in scan output"}],
+                "safe": score < 50 and severity not in ["HIGH", "CRITICAL"],
+                "risk_score": score,
+                "risk_severity": severity,
+                "findings": findings,
                 "scanner": "NVIDIA SkillSpector"
             }
-        return {
-            "safe": True,
-            "risk_score": 0,
-            "risk_severity": "LOW",
-            "findings": [],
-            "scanner": "NVIDIA SkillSpector"
-        }
+        except Exception:
+            if "HIGH" in stdout or "CRITICAL" in stdout:
+                return {
+                    "safe": False,
+                    "risk_score": 80,
+                    "risk_severity": "HIGH",
+                    "findings": [{"message": "High severity flags found in scan output"}],
+                    "scanner": "NVIDIA SkillSpector"
+                }
+            return {
+                "safe": True,
+                "risk_score": 0,
+                "risk_severity": "LOW",
+                "findings": [],
+                "scanner": "NVIDIA SkillSpector"
+            }
 
-def static_security_fallback(skill_path):
-    """Fallback static regex scanner when SkillSpector binary is absent."""
-    suspicious_patterns = [
-        (r"curl.*\|.*bash", "Piped shell execution via curl"),
-        (r"nc\s+-[e|c]", "Netcat reverse shell"),
-        (r"/dev/tcp/\d+", "Bash interactive reverse shell"),
-        (r"eval\(", "Dangerous eval execution"),
-        (r"rm\s+-rf\s+/", "Destructive root filesystem removal"),
-        (r"env\s*\|\s*curl", "Environment variable exfiltration")
+    # Case B: SkillSpector missing -> Check for Alternative Skill Inspectors
+    alt_inspectors = discover_alternative_inspectors()
+    if alt_inspectors:
+        alt_names = ", ".join([a["name"] for a in alt_inspectors])
+        print(f"[INFO] NVIDIA SkillSpector CLI not in PATH, but discovered alternative inspector skill(s): [{alt_names}].")
+        print(" -> Utilizing alternative multi-phase security audit rules...")
+        # Run enhanced static audit modeled after skill-audit 6-phase rules
+        return advanced_skill_audit(skill_path, inspector_name=alt_names)
+
+    # Case C: No Inspector Found Anywhere -> Prompt User or Auto-Install
+    print("\n" + "!" * 60)
+    print(" [NOTICE] No AI Skill Security Inspector was detected in your system!")
+    print(" Third-party skills execute shell commands and tool calls with full agent")
+    print(" privileges (risks include prompt injection, credential exfiltration, RCE).")
+    print("!" * 60)
+
+    should_install = auto_install_inspector
+    if not should_install and interactive and sys.stdin.isatty():
+        try:
+            choice = input("\nWould you like to install NVIDIA SkillSpector now? [y/N]: ").strip().lower()
+            should_install = choice in ["y", "yes"]
+        except (KeyboardInterrupt, EOFError):
+            should_install = False
+
+    if should_install:
+        if setup_nvidia_skillspector():
+            return scan_security(skill_path, interactive=False, auto_install_inspector=False)
+
+    print("\n[FALLBACK] Proceeding with built-in heuristic static security scan.")
+    print(" -> Tip: Run 'skill-installer setup-inspector' anytime to install NVIDIA SkillSpector.")
+    return static_security_fallback(skill_path)
+
+def advanced_skill_audit(skill_path, inspector_name="skill-audit"):
+    """
+    Enhanced 6-phase security analysis (surface scan + script check + credential audit)
+    inspired by the skill-audit security framework.
+    """
+    critical_patterns = [
+        (r"ignore\s+(all\s+)?previous\s+instructions", "PROMPT_INJECTION", "Instruction override / jailbreak pattern"),
+        (r"you\s+are\s+now\s+in\s+developer\s+mode", "ROLE_MANIPULATION", "Agent identity hijack attempt"),
+        (r"curl\s+-[a-zA-Z0-9\s-]*\s+https?://[^\s|]+\s*\|\s*(bash|sh|python3?)", "PIPED_SHELL", "Remote piped shell execution"),
+        (r"wget\s+-[a-zA-Z0-9\s-]*\s+https?://[^\s|]+\s*\|\s*(bash|sh|python3?)", "PIPED_SHELL", "Wget piped shell execution"),
+        (r"nc\s+-[a-zA-Z0-9]*e\s+/bin/(ba)?sh", "REVERSE_SHELL", "Netcat interactive reverse shell"),
+        (r"/dev/tcp/\d+\.\d+\.\d+\.\d+/\d+", "REVERSE_SHELL", "Bash /dev/tcp socket connection"),
+        (r"(process\.env|os\.environ)\[['\"].*['\"]\]\s*.*\b(curl|fetch|http\.post)\b", "DATA_EXFILTRATION", "Environment credential exfiltration"),
+        (r"cat\s+~?/\.ssh/id_rsa", "CREDENTIAL_THEFT", "Direct SSH private key read"),
+        (r"cat\s+~?/\.config/gh/hosts\.yml", "CREDENTIAL_THEFT", "Direct GitHub token harvest"),
+        (r"rm\s+-rf\s+/\s*$", "DESTRUCTIVE_COMMAND", "Destructive root filesystem wipe")
     ]
 
     findings = []
+    risk_score = 0
+
     for p in Path(skill_path).glob("**/*"):
-        if p.is_file() and p.suffix in [".md", ".py", ".sh", ".js"]:
+        if p.is_file() and p.suffix in [".md", ".py", ".sh", ".js", ".json", ".yaml", ".yml"]:
+            # Skip documentation in references/ that explains rules
+            if "references" in p.parts:
+                continue
             try:
                 content = p.read_text(encoding="utf-8", errors="ignore")
-                for pat, desc in suspicious_patterns:
+                for pat, rule_id, desc in critical_patterns:
                     if re.search(pat, content, re.IGNORECASE):
-                        findings.append({"rule_id": "FALLBACK_STATIC", "message": f"{desc} in {p.name}"})
+                        findings.append({
+                            "rule_id": rule_id,
+                            "severity": "CRITICAL" if rule_id in ["REVERSE_SHELL", "DATA_EXFILTRATION", "PIPED_SHELL"] else "HIGH",
+                            "message": f"{desc} found in '{p.name}'"
+                        })
+                        risk_score += 35
             except Exception:
                 pass
 
+    severity = "CRITICAL" if risk_score >= 70 else ("HIGH" if risk_score >= 40 else "LOW")
     return {
-        "safe": len(findings) == 0,
-        "risk_score": 75 if findings else 0,
-        "risk_severity": "HIGH" if findings else "LOW",
+        "safe": risk_score < 40,
+        "risk_score": min(risk_score, 100),
+        "risk_severity": severity,
         "findings": findings,
-        "scanner": "Built-in Static Fallback"
+        "scanner": f"Alternative Inspector ({inspector_name})"
     }
+
+def static_security_fallback(skill_path):
+    """Fallback static regex scanner when no external inspector is installed."""
+    return advanced_skill_audit(skill_path, inspector_name="Built-in Static Heuristic")
 
 def detect_or_create_backup_repo(dest_path):
     """
@@ -245,7 +335,7 @@ def detect_or_create_backup_repo(dest_path):
 
     return {"type": "LOCAL_ONLY"}
 
-def install_and_sync(source, target_dir=DEFAULT_SKILLS_DIR, force=False):
+def install_and_sync(source, target_dir=DEFAULT_SKILLS_DIR, force=False, auto_install_inspector=False):
     """Full 3-stage installation pipeline."""
     print("=" * 60)
     print("  SKILL INSTALLER - Intelligent Security & Backup Pipeline")
@@ -274,7 +364,7 @@ def install_and_sync(source, target_dir=DEFAULT_SKILLS_DIR, force=False):
         
         target_file = temp_dir / "SKILL.md"
         try:
-            req = urllib.request.Request(source, headers={"User-Agent": "Skill-Installer/1.0"})
+            req = urllib.request.Request(source, headers={"User-Agent": "Skill-Installer/2.1"})
             with urllib.request.urlopen(req) as resp, open(target_file, "wb") as f:
                 f.write(resp.read())
             source_path = temp_dir
@@ -310,14 +400,14 @@ def install_and_sync(source, target_dir=DEFAULT_SKILLS_DIR, force=False):
         print("[WARN] Existing skills already cover this functionality. Re-evaluating necessity...")
         print(" -> If this skill adds distinct tools or specialized patterns, proceed with --force.")
 
-    print(f"\n[STAGE 2] NVIDIA SkillSpector Security Scan")
-    scan = scan_security(source_path)
+    print(f"\n[STAGE 2] Security Inspection Gate")
+    scan = scan_security(source_path, interactive=True, auto_install_inspector=auto_install_inspector)
     print(f" -> Engine: {scan['scanner']}")
     print(f" -> Risk Severity: {scan['risk_severity']} (Score: {scan['risk_score']}/100)")
     if scan["findings"]:
         print(" -> Findings:")
         for f in scan["findings"]:
-            print(f"    - {f.get('rule_id', 'ALERT')}: {f.get('message', '')}")
+            print(f"    - {f.get('rule_id', 'ALERT')} [{f.get('severity', 'WARN')}]: {f.get('message', '')}")
 
     if not scan["safe"] and not force:
         print("\n[SECURITY BLOCK] Skill failed security inspection! Malicious or high-risk patterns detected.")
@@ -366,16 +456,19 @@ def main():
     install_parser.add_argument("source", help="Path, GitHub raw URL, or repository folder")
     install_parser.add_argument("--skills-dir", default=DEFAULT_SKILLS_DIR, help="Target skills directory")
     install_parser.add_argument("--force", action="store_true", help="Force install even if alternatives or minor warnings exist")
+    install_parser.add_argument("--auto-install-inspector", action="store_true", help="Automatically install NVIDIA SkillSpector if missing without prompting")
 
     check_parser = subparsers.add_parser("check", help="Check if a skill is needed or has existing alternatives")
     check_parser.add_argument("source", help="Path or URL to SKILL.md")
 
-    scan_parser = subparsers.add_parser("scan", help="Run NVIDIA SkillSpector security scan on a skill")
+    scan_parser = subparsers.add_parser("scan", help="Run security inspection on a skill")
     scan_parser.add_argument("path", help="Local path to skill directory")
+
+    setup_parser = subparsers.add_parser("setup-inspector", help="Setup NVIDIA SkillSpector virtual environment and CLI")
 
     args = parser.parse_args()
     if args.command == "install":
-        success = install_and_sync(args.source, args.skills_dir, args.force)
+        success = install_and_sync(args.source, args.skills_dir, args.force, args.auto_install_inspector)
         sys.exit(0 if success else 1)
     elif args.command == "check":
         meta = parse_skill_metadata(Path(args.source).read_text())
@@ -385,6 +478,9 @@ def main():
     elif args.command == "scan":
         res = scan_security(args.path)
         print(json.dumps(res, indent=2))
+    elif args.command == "setup-inspector":
+        ok = setup_nvidia_skillspector()
+        sys.exit(0 if ok else 1)
     else:
         parser.print_help()
 

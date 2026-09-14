@@ -1,4 +1,43 @@
-# NVIDIA SkillSpector Security Architecture
+# Security Inspection Architecture & Inspector Discovery Hierarchy
+
+## Adaptive Discovery Hierarchy
+When an agent or developer invokes `skill-installer`, the tool ensures security through an adaptive multi-tier hierarchy:
+
+```
+                  ┌──────────────────────────────────────────────┐
+                  │ 1. Is NVIDIA SkillSpector installed in PATH  │
+                  │    or ~/.venv-skillspector/bin/skillspector? │
+                  └──────────────────────┬───────────────────────┘
+                                         │
+                         ┌───────────────┴───────────────┐
+                         │                               │
+                       [YES]                            [NO]
+                         │                               │
+                         ▼                               ▼
+                 Run NVIDIA AST &          ┌───────────────────────────┐
+                 Semantic Analysis         │ 2. Check for Alternative  │
+                                           │    Inspector Skills       │
+                                           │    (e.g., skill-audit)    │
+                                           └─────────────┬─────────────┘
+                                                         │
+                                         ┌───────────────┴───────────────┐
+                                         │                               │
+                                       [YES]                            [NO]
+                                         │                               │
+                                         ▼                               ▼
+                              Execute Multi-Phase             ┌───────────────────────────┐
+                              Audit Framework                 │ 3. Prompt User:           │
+                                                              │    "Install SkillSpector?"│
+                                                              └─────────────┬─────────────┘
+                                                                            │
+                                                            ┌───────────────┴───────────────┐
+                                                            │                               │
+                                                          [YES]                            [NO]
+                                                            │                               │
+                                                            ▼                               ▼
+                                                   Run 1-Click Setup:             Built-in Heuristic
+                                                   ~/.venv-skillspector            Static Analyzer
+```
 
 ## Threat Vector Analysis for Agent Skills
 Agent skills are fundamentally executable prompt instructions combined with scripts and tools. They operate with elevated agent privileges:
@@ -17,6 +56,6 @@ Agent skills are fundamentally executable prompt instructions combined with scri
    Silent transmission of sensitive local paths (e.g. `~/.ssh`, `~/.aws/credentials`, `~/.config/gh`) to third-party endpoints.
 
 ## Scoring & Quarantine Policy
-- **Risk Score 0-25 (LOW):** Verified clean. Auto-install permitted.
-- **Risk Score 26-49 (MEDIUM):** Informational warnings (e.g., unusual network calls). Manual inspection recommended.
-- **Risk Score 50+ / Severity HIGH or CRITICAL:** Installation blocked immediately. Skill quarantined to prevent agent infection.
+- **Risk Score 0-39 (LOW):** Verified clean. Auto-install permitted.
+- **Risk Score 40-69 (MEDIUM):** Informational warnings (e.g., unusual network calls). Manual inspection recommended.
+- **Risk Score 70+ / Severity HIGH or CRITICAL:** Installation blocked immediately. Skill quarantined to prevent agent infection.

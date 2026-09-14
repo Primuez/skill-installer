@@ -93,16 +93,25 @@ Agents suffer from context degradation when flooded with overlapping or redundan
   - If 2+ existing skills already cover 80%+ of the capability (e.g. requesting `duckduckgo-search` when `n8n-search` + `deep-research` already exist), installation is skipped with an explanatory rationale.
   - If the skill provides a genuine architectural upgrade or fills an unaddressed domain gap, it passes to Stage 2.
 
-### Stage 2: NVIDIA SkillSpector Security Inspection
+### Stage 2: Security Inspection Gate & Inspector Discovery Hierarchy
 
 Agent skills execute with shell and tool privileges. Malicious third-party skills can exfiltrate API keys, execute remote payloads, or hijack agent prompts.
-- Runs `skillspector scan <path> --format json` using NVIDIA's static and semantic analysis engine.
-- Flags and halts on:
-  - Tool poisoning & prompt injection
-  - Environment variable and credential harvesting (`env`, `.env`, API keys)
-  - Piped shell executions (`curl ... | bash`, reverse shells)
-  - Destructive file system modifications
-- Skills with risk score ≥ 50 or severity `HIGH`/`CRITICAL` are instantly blocked.
+
+To ensure safety across diverse environments, Skill Installer implements an **adaptive inspector discovery hierarchy**:
+
+1. **Primary Gate (NVIDIA SkillSpector):**
+   - Automatically detects NVIDIA SkillSpector binary in PATH or `~/.venv-skillspector/bin/skillspector`.
+   - Runs deep AST & semantic scanning for tool poisoning, prompt overrides, and credential harvesting.
+
+2. **Secondary Gate (Alternative Inspector Discovery):**
+   - If NVIDIA SkillSpector is not installed as a binary, Skill Installer automatically searches your agent's library for alternative security auditor skills (such as `skill-audit`, `cyber-audit`, or `skill-check`).
+   - If found, it routes the skill through multi-phase surface, script, and credential audit rules.
+
+3. **Tertiary Gate (Interactive User Onboarding & Setup):**
+   - If NO skill inspector or scanner exists in your system, the agent/CLI prompts the user:
+     > *"⚠️ No skill security inspector detected in your system. Third-party skills execute shell commands with agent privileges. Would you like to install NVIDIA SkillSpector? (Recommended)"*
+   - Can be automatically installed via `skill-installer setup-inspector` (or `--auto-install-inspector` flag).
+   - If declined, it falls back to the built-in static heuristic analyzer with an explicit warning advisory.
 
 ### Stage 3: Automated Installation & Smart Backup Routing
 
